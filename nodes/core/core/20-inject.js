@@ -51,8 +51,6 @@ module.exports = function(RED) {
 
         this.on("input",function(msg) {
             try {
-                console.log(msg);
-
                 msg.topic = this.topic;
                 if ( (this.payloadType == null && this.payload === "") || this.payloadType === "date") {
                     msg.payload = Date.now();
