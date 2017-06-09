@@ -48,6 +48,7 @@
         },
         re: {value:"re",label:"regular expression",icon:"red/images/typedInput/re.png"},
         date: {value:"date",label:"timestamp",hasValue:false},
+        prompt: {value:"prompt",label:"prompt",hasValue:false},
         jsonata: {
             value: "jsonata",
             label: "expression",

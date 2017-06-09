@@ -51,16 +51,21 @@ module.exports = function(RED) {
 
         this.on("input",function(msg) {
             try {
+                console.log(msg);
+
                 msg.topic = this.topic;
                 if ( (this.payloadType == null && this.payload === "") || this.payloadType === "date") {
                     msg.payload = Date.now();
                 } else if (this.payloadType == null) {
                     msg.payload = this.payload;
+                }else if (this.payloadType == 'prompt' && msg.body){
+                    msg.payload = msg.body;
                 } else if (this.payloadType == 'none') {
                     msg.payload = "";
                 } else {
                     msg.payload = RED.util.evaluateNodeProperty(this.payload,this.payloadType,this,msg);
                 }
+                delete msg.body;
                 this.send(msg);
                 msg = null;
             } catch(err) {
@@ -86,7 +91,7 @@ module.exports = function(RED) {
         var node = RED.nodes.getNode(req.params.id);
         if (node != null) {
             try {
-                node.receive();
+                node.receive(req.body);
                 res.sendStatus(200);
             } catch(err) {
                 res.sendStatus(500);
