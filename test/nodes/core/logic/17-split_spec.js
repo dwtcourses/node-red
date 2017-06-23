@@ -58,43 +58,22 @@ describe('SPLIT node', function() {
         });
     });
 
-    it('should split a string into new-lines', function(done) {
-        var flow = [{id:"sn1", type:"split", wires:[["sn2"]]},
+    it('should split an array into multiple messages of a specified size', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], arraySplt:3, arraySpltType:"len"},
                     {id:"sn2", type:"helper"}];
         helper.load(splitNode, flow, function() {
             var sn1 = helper.getNode("sn1");
             var sn2 = helper.getNode("sn2");
             sn2.on("input", function(msg) {
                 msg.should.have.property("parts");
-                msg.parts.should.have.property("count",4);
-                msg.parts.should.have.property("type","string");
+                msg.parts.should.have.property("count",2);
+                msg.parts.should.have.property("type","array");
                 msg.parts.should.have.property("index");
-                if (msg.parts.index === 0) { msg.payload.should.equal("D"); }
-                if (msg.parts.index === 1) { msg.payload.should.equal("a"); }
-                if (msg.parts.index === 2) { msg.payload.should.equal("v"); }
-                if (msg.parts.index === 3) { msg.payload.should.equal("e"); done(); }
+                msg.payload.should.be.an.Array;
+                if (msg.parts.index === 0) { msg.payload.length.should.equal(3); }
+                if (msg.parts.index === 1) { msg.payload.length.should.equal(1); done(); }
             });
-            sn1.receive({payload:"D\na\nv\ne"});
-        });
-    });
-
-    it('should split a string on a specified char', function(done) {
-        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"\n"},
-                    {id:"sn2", type:"helper"}];
-        helper.load(splitNode, flow, function() {
-            var sn1 = helper.getNode("sn1");
-            var sn2 = helper.getNode("sn2");
-            sn2.on("input", function(msg) {
-                msg.should.have.property("parts");
-                msg.parts.should.have.property("count",3);
-                msg.parts.should.have.property("ch","\n");
-                msg.parts.should.have.property("index");
-                msg.parts.should.have.property("type","string");
-                if (msg.parts.index === 0) { msg.payload.should.equal("1"); }
-                if (msg.parts.index === 1) { msg.payload.should.equal("2"); }
-                if (msg.parts.index === 2) { msg.payload.should.equal("3"); done(); }
-            });
-            sn1.receive({payload:"1\n2\n3"});
+            sn1.receive({payload:[1,2,3,4]});
         });
     });
 
@@ -120,6 +99,136 @@ describe('SPLIT node', function() {
         });
     });
 
+    it('should split a string into new-lines', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]]},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                msg.should.have.property("parts");
+                msg.parts.should.have.property("count",4);
+                msg.parts.should.have.property("type","string");
+                msg.parts.should.have.property("index");
+                if (msg.parts.index === 0) { msg.payload.should.equal("Da"); }
+                if (msg.parts.index === 1) { msg.payload.should.equal("ve"); }
+                if (msg.parts.index === 2) { msg.payload.should.equal(" "); }
+                if (msg.parts.index === 3) { msg.payload.should.equal("CJ"); done(); }
+            });
+            sn1.receive({payload:"Da\nve\n \nCJ"});
+        });
+    });
+
+    it('should split a string on a specified char', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"\n"},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                msg.should.have.property("parts");
+                msg.parts.should.have.property("count",3);
+                msg.parts.should.have.property("ch","\n");
+                msg.parts.should.have.property("index");
+                msg.parts.should.have.property("type","string");
+                if (msg.parts.index === 0) { msg.payload.should.equal("1"); }
+                if (msg.parts.index === 1) { msg.payload.should.equal("2"); }
+                if (msg.parts.index === 2) { msg.payload.should.equal("3"); done(); }
+            });
+            sn1.receive({payload:"1\n2\n3"});
+        });
+    });
+
+    it('should split a string into lengths', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"2", spltType:"len"},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                msg.should.have.property("parts");
+                msg.parts.should.have.property("count",4);
+                msg.parts.should.have.property("ch","");
+                msg.parts.should.have.property("index");
+                msg.parts.should.have.property("type","string");
+                if (msg.parts.index === 0) { msg.payload.should.equal("12"); }
+                if (msg.parts.index === 1) { msg.payload.should.equal("34"); }
+                if (msg.parts.index === 2) { msg.payload.should.equal("56"); }
+                if (msg.parts.index === 3) { msg.payload.should.equal("78"); done(); }
+            });
+            sn1.receive({payload:"12345678"});
+        });
+    });
+
+    it('should split a string on a specified char in stream mode', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"\n", stream:true},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                msg.should.have.property("parts");
+                msg.parts.should.have.property("ch","\n");
+                msg.parts.should.have.property("index");
+                msg.parts.should.have.property("type","string");
+                if (msg.parts.index === 0) { msg.payload.should.equal("1"); }
+                if (msg.parts.index === 1) { msg.payload.should.equal("2"); }
+                if (msg.parts.index === 2) { msg.payload.should.equal("3"); }
+                if (msg.parts.index === 3) { msg.payload.should.equal("4"); }
+                if (msg.parts.index === 4) { msg.payload.should.equal("5"); }
+                if (msg.parts.index === 5) { msg.payload.should.equal("6"); done(); }
+            });
+            sn1.receive({payload:"1\n2\n3\n"});
+            sn1.receive({payload:"4\n5\n6\n"});
+        });
+    });
+
+    it('should split a buffer into lengths', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"2", spltType:"len"},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                //console.log(msg);
+                msg.should.have.property("parts");
+                msg.payload.should.be.a.Buffer;
+                msg.parts.should.have.property("count",4);
+                msg.parts.should.have.property("index");
+                msg.parts.should.have.property("type","buffer");
+                if (msg.parts.index === 0) { msg.payload.toString().should.equal("12"); }
+                if (msg.parts.index === 1) { msg.payload.toString().should.equal("34"); }
+                if (msg.parts.index === 2) { msg.payload.toString().should.equal("56"); }
+                if (msg.parts.index === 3) { msg.payload.toString().should.equal("78"); done(); }
+            });
+            var b = new Buffer.from("12345678");
+            sn1.receive({payload:b});
+        });
+    });
+
+    it('should split a buffer on another buffer (streaming)', function(done) {
+        var flow = [{id:"sn1", type:"split", wires:[["sn2"]], splt:"[52]", spltType:"bin", stream:true},
+                    {id:"sn2", type:"helper"}];
+        helper.load(splitNode, flow, function() {
+            var sn1 = helper.getNode("sn1");
+            var sn2 = helper.getNode("sn2");
+            sn2.on("input", function(msg) {
+                //console.log(msg);
+                msg.should.have.property("parts");
+                msg.payload.should.be.a.Buffer;
+                msg.parts.should.have.property("index");
+                msg.parts.should.have.property("type","buffer");
+                if (msg.parts.index === 0) { msg.payload.toString().should.equal("123"); }
+                if (msg.parts.index === 1) { msg.payload.toString().should.equal("123"); }
+                if (msg.parts.index === 2) { msg.payload.toString().should.equal("123"); done(); }
+            });
+            var b1 = new Buffer.from("123412");
+            var b2 = new Buffer.from("341234");
+            sn1.receive({payload:b1});
+            sn1.receive({payload:b2});
+        });
+    });
+
 });
 
 describe('JOIN node', function() {
@@ -141,6 +250,27 @@ describe('JOIN node', function() {
             joinNode1.should.have.property('timer', 0);
             joinNode1.should.have.property('build', 'array');
             done();
+        });
+    });
+
+    it('should join bits of string back together automatically', function(done) {
+        var flow = [{id:"n1", type:"join", wires:[["n2"]], joiner:",", build:"string", mode:"auto"},
+                    {id:"n2", type:"helper"}];
+        helper.load(joinNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                try {
+                    msg.should.have.property("payload");
+                    msg.payload.should.equal("A,B,C,D");
+                    done();
+                }
+                catch(e) {done(e);}
+            });
+            n1.receive({payload:"A", parts:{id:1, type:"string", ch:",", index:0, count:4}});
+            n1.receive({payload:"B", parts:{id:1, type:"string", ch:",", index:1, count:4}});
+            n1.receive({payload:"C", parts:{id:1, type:"string", ch:",", index:2, count:4}});
+            n1.receive({payload:"D", parts:{id:1, type:"string", ch:",", index:3, count:4}});
         });
     });
 

@@ -17,35 +17,125 @@
 module.exports = function(RED) {
     "use strict";
 
+    function sendArray(node,msg,array) {
+        for (var i = 0; i < array.length-1; i++) {
+            msg.payload = array[i];
+            msg.parts.index = node.c++;
+            if (node.stream !== true) { msg.parts.count = array.length; }
+            node.send(RED.util.cloneMessage(msg));
+        }
+        if (node.stream !== true) {
+            msg.payload = array[i];
+            msg.parts.index = node.c++;
+            msg.parts.count = array.length;
+            node.send(RED.util.cloneMessage(msg));
+            node.c = 0;
+        }
+        else { node.remainder = array[i]; }
+    }
+
     function SplitNode(n) {
         RED.nodes.createNode(this,n);
-        this.splt = (n.splt || "\\n").replace(/\\n/,"\n").replace(/\\r/,"\r").replace(/\\t/,"\t").replace(/\\e/,"\e").replace(/\\f/,"\f").replace(/\\0/,"\0");
-        try {
-            var s = JSON.parse(n.splt.trim());
-            if (Array.isArray(s)) { this.splt = new Buffer.from(s); }
-        }
-        catch (e) {}
         var node = this;
+        node.stream = n.stream;
+        node.spltType = n.spltType || "str";
+        try {
+            if (node.spltType === "str") {
+                this.splt = (n.splt || "\\n").replace(/\\n/,"\n").replace(/\\r/,"\r").replace(/\\t/,"\t").replace(/\\e/,"\e").replace(/\\f/,"\f").replace(/\\0/,"\0");
+            } else if (node.spltType === "bin") {
+                var spltArray = JSON.parse(n.splt);
+                if (Array.isArray(spltArray)) {
+                    this.splt = Buffer.from(spltArray);
+                } else {
+                    throw new Error("not an array");
+                }
+                this.spltBuffer = spltArray;
+            } else if (node.spltType === "len") {
+                this.splt = parseInt(n.splt);
+                if (isNaN(this.splt) || this.splt < 1) {
+                    throw new Error("invalid split length: "+n.splt);
+                }
+            }
+            this.arraySplt = (n.arraySplt === undefined)?1:parseInt(n.arraySplt);
+            if (isNaN(this.arraySplt) || this.arraySplt < 1) {
+                throw new Error("invalid array split length: "+n.arraySplt);
+            }
+        } catch(err) {
+            this.error("Invalid split property: "+err.toString());
+            return;
+        }
         node.c = 0;
-        node.buffer = new Buffer([]);
+        node.buffer = new Buffer.from([]);
         this.on("input", function(msg) {
             if (msg.hasOwnProperty("payload")) {
-                var a = msg.payload;
                 if (msg.hasOwnProperty("parts")) { msg.parts = { parts:msg.parts }; } // push existing parts to a stack
                 else { msg.parts = {}; }
                 msg.parts.id = msg._msgid;  // use the existing _msgid by default.
                 if (typeof msg.payload === "string") { // Split String into array
-                    a = msg.payload.split(node.splt);
-                    msg.parts.ch = node.splt; // pass the split char to other end for rejoin
+                    msg.payload = (node.remainder || "") + msg.payload;
                     msg.parts.type = "string";
+                    if (node.spltType === "len") {
+                        msg.parts.ch = "";
+                        var count = msg.payload.length/node.splt;
+                        if (Math.floor(count) !== count) {
+                            // Partial last packet
+                            //TODO stream support
+                            count = Math.ceil(count);
+                        }
+                        if (node.stream !== true) {
+                            msg.parts.count = count;
+                            node.c = 0;
+                        }
+                        var pos = 0;
+                        var data = msg.payload;
+                        for (var i=0; i<count-1; i++) {
+                            msg.payload = data.substring(pos,pos+node.splt);
+                            msg.parts.index = node.c++;
+                            pos += node.splt;
+                            node.send(RED.util.cloneMessage(msg));
+                        }
+                        node.remainder = data.substring(pos);
+                        if ((node.stream !== true) || (node.remainder.length === node.splt)) {
+                            msg.payload = node.remainder;
+                            msg.parts.index = node.c++;
+                            node.send(RED.util.cloneMessage(msg));
+                            node.remainder = "";
+                        }
+                    }
+                    else {
+                        var a = [];
+                        if (node.spltType === "bin") {
+                            if (!node.spltBufferString) {
+                                node.spltBufferString = node.splt.toString();
+                            }
+                            a = msg.payload.split(node.spltBufferString);
+                            msg.parts.ch = node.spltBuffer; // pass the split char to other end for rejoin
+                        } else if (node.spltType === "str") {
+                            a = msg.payload.split(node.splt);
+                            msg.parts.ch = node.splt; // pass the split char to other end for rejoin
+                        }
+                        sendArray(node,msg,a);
+                    }
                 }
-                if (Array.isArray(a)) { // then split array into messages
-                    msg.parts.type = msg.parts.type || "array";  // if it wasn't a string in the first place
-                    for (var i = 0; i < a.length; i++) {
-                        msg.payload = a[i];
+                else if (Array.isArray(msg.payload)) { // then split array into messages
+                    msg.parts.type = "array";
+                    var count = msg.payload.length/node.arraySplt;
+                    if (Math.floor(count) !== count) {
+                        // Partial last packet
+                        //TODO stream support
+                        count = Math.ceil(count);
+                    }
+                    msg.parts.count = count;
+                    var pos = 0;
+                    var data = msg.payload;
+                    msg.parts.len = node.arraySplt;
+                    for (var i=0; i<count; i++) {
+                        msg.payload = data.slice(pos,pos+node.arraySplt);
+                        if (node.arraySplt === 1) {
+                            msg.payload = msg.payload[0];
+                        }
                         msg.parts.index = i;
-                        msg.parts.count = a.length;
-                        //if (i === a.length-1) { msg.complete = true; }
+                        pos += node.arraySplt;
                         node.send(RED.util.cloneMessage(msg));
                     }
                 }
@@ -65,27 +155,80 @@ module.exports = function(RED) {
                         }
                     }
                 }
-                // Handle Buffer objects.... with overlaps to handle partial stream like
                 else if (Buffer.isBuffer(msg.payload)) {
                     var len = node.buffer.length + msg.payload.length;
                     var buff = Buffer.concat([node.buffer, msg.payload], len);
-                    var pos = buff.indexOf(node.splt);
                     msg.parts.type = "buffer";
-                    msg.parts.ch = node.splt; // pass the split to other end for rejoin (maybe)
-                    while (pos !== -1) {
-                        msg.payload = buff.slice(0,pos);
-                        msg.parts.index = node.c;
-                        node.c += 1;
-                        buff = buff.slice(pos + node.splt.length);
-                        if (buff.length === 0) {
-                            msg.parts.count = node.c;
-                            node.c = 0; //reset the count if no remainder.
+                    if (node.spltType === "len") {
+                        var count = buff.length/node.splt;
+                        if (Math.floor(count) !== count) {
+                            // Partial last packet
+                            //TODO stream support
+                            count = Math.ceil(count);
                         }
-                        node.send(RED.util.cloneMessage(msg));
-                        pos = buff.indexOf(node.splt);
+                        if (node.stream !== true) {
+                            msg.parts.count = count;
+                            node.c = 0;
+                        }
+                        var pos = 0;
+                        msg.parts.len = node.splt;
+                        for (var i=0; i<count-1; i++) {
+                            msg.payload = buff.slice(pos,pos+node.splt);
+                            msg.parts.index = node.c++;
+                            pos += node.splt;
+                            node.send(RED.util.cloneMessage(msg));
+                        }
+                        node.buffer = buff.slice(pos);
+                        if ((node.stream !== true) || (node.buffer.length === node.splt)) {
+                            msg.payload = node.buffer;
+                            msg.parts.index = node.c++;
+                            node.send(RED.util.cloneMessage(msg));
+                            node.buffer = new Buffer.from([]);
+                        }
                     }
-                    // save the remainder to use as start of next time round
-                    node.buffer = buff;
+                    else {
+                        var count = 0;
+                        if (node.spltType === "bin") {
+                            msg.parts.ch = node.spltBuffer;
+                        } else if (node.spltType === "str") {
+                            msg.parts.ch = node.splt;
+                        }
+                        var pos = buff.indexOf(node.splt);
+                        var end;
+                        while (pos > -1) {
+                            count++;
+                            end = pos+node.splt.length;
+                            pos = buff.indexOf(node.splt,end);
+                        }
+                        //TODO: stream support
+                        // if (end < msg.payload.length) {
+                            count++;
+                        // }
+                        if (node.stream !== true) {
+                            msg.parts.count = count;
+                            node.c = 0;
+                        }
+                        var i = 0, p = 0;
+                        pos = buff.indexOf(node.splt);
+                        while (pos > -1) {
+                            msg.payload = buff.slice(p,pos);
+                            msg.parts.index = node.c++;
+                            node.send(RED.util.cloneMessage(msg));
+                            i++;
+                            p = pos+node.splt.length;
+                            pos = buff.indexOf(node.splt,p);
+                        }
+                        if ((node.stream !== true) && (p < buff.length)) {
+                            // TODO: stream support;
+                            msg.payload = buff.slice(p,buff.length);
+                            msg.parts.index = node.c++;
+                            msg.parts.count = node.c++;
+                            node.send(RED.util.cloneMessage(msg));
+                        }
+                        else {
+                            node.buffer = buff.slice(p,buff.length);
+                        }
+                    }
                 }
                 //else {  }   // otherwise drop the message.
             }
@@ -116,6 +259,32 @@ module.exports = function(RED) {
             var group = inflight[partId];
             clearTimeout(group.timeout);
             if ((node.accumulate !== true) || group.msg.hasOwnProperty("complete")) { delete inflight[partId]; }
+            if (group.type === 'array' && group.arrayLen > 1) {
+                var newArray = [];
+                group.payload.forEach(function(n) {
+                    newArray = newArray.concat(n);
+                })
+                group.payload = newArray;
+            } else if (group.type === 'buffer') {
+                var buffers = [];
+                var bufferLen = 0;
+                if (group.joinChar !== undefined) {
+                    var joinBuffer = Buffer.from(group.joinChar);
+                    for (var i=0; i<group.payload.length; i++) {
+                        if (i > 0) {
+                            buffers.push(joinBuffer);
+                            bufferLen += joinBuffer.length;
+                        }
+                        buffers.push(group.payload[i]);
+                        bufferLen += group.payload[i].length;
+                    }
+                } else {
+                    bufferLen = group.bufferLen;
+                    buffers = group.payload;
+                }
+                group.payload = Buffer.concat(buffers,bufferLen);
+            }
+
             if (group.type === 'string') {
                 RED.util.setMessageProperty(group.msg,node.property,group.payload.join(group.joinChar));
             } else {
@@ -154,6 +323,7 @@ module.exports = function(RED) {
                 var propertyKey;
                 var targetCount;
                 var joinChar;
+                var arrayLen;
                 var propertyIndex;
                 if (node.mode === "auto") {
                     // Use msg.parts to identify all of the group information
@@ -162,6 +332,7 @@ module.exports = function(RED) {
                     targetCount = msg.parts.count;
                     joinChar = msg.parts.ch;
                     propertyKey = msg.parts.key;
+                    arrayLen = msg.parts.len;
                     propertyIndex = msg.parts.index;
                 }
                 else {
@@ -201,8 +372,11 @@ module.exports = function(RED) {
                             currentCount:0,
                             payload:{},
                             targetCount:targetCount,
-                            type:"object",
+                            type:payloadType,
                             msg:msg
+                        }
+                        if (payloadType === 'string') {
+                            inflight[partId].payload = [];
                         }
                     }
                     else {
@@ -211,11 +385,14 @@ module.exports = function(RED) {
                             payload:[],
                             targetCount:targetCount,
                             type:payloadType,
-                            joinChar: joinChar,
                             msg:msg
                         };
                         if (payloadType === 'string') {
                             inflight[partId].joinChar = joinChar;
+                        } else if (payloadType === 'array') {
+                            inflight[partId].arrayLen = arrayLen;
+                        } else if (payloadType === 'buffer') {
+                            inflight[partId].bufferLen = 0;
                         }
                     }
                     if (node.timer > 0) {
@@ -226,18 +403,19 @@ module.exports = function(RED) {
                 }
 
                 var group = inflight[partId];
+                if (payloadType === 'buffer') {
+                    inflight[partId].bufferLen += property.length;
+                }
                 if (payloadType === 'object') {
                     group.payload[propertyKey] = property;
                     group.currentCount = Object.keys(group.payload).length;
                     //msg.topic = node.topic || msg.topic;
-                }
-                else if (payloadType === 'merged') {
+                } else if (payloadType === 'merged') {
                     if (Array.isArray(property) || typeof property !== 'object') {
                         if (!msg.hasOwnProperty("complete")) {
                             node.warn("Cannot merge non-object types");
                         }
-                    }
-                    else {
+                    } else {
                         for (propertyKey in property) {
                             if (property.hasOwnProperty(propertyKey)) {
                                 group.payload[propertyKey] = property[propertyKey];
@@ -246,8 +424,7 @@ module.exports = function(RED) {
                         group.currentCount = Object.keys(group.payload).length;
                         //group.currentCount++;
                     }
-                }
-                else {
+                } else {
                     if (!isNaN(propertyIndex)) {
                         group.payload[propertyIndex] = property;
                     } else {
@@ -257,7 +434,9 @@ module.exports = function(RED) {
                 }
                 // TODO: currently reuse the last received - add option to pick first received
                 group.msg = msg;
-                if (group.currentCount >= group.targetCount || msg.hasOwnProperty('complete')) {
+                var tcnt = group.targetCount;
+                if (msg.hasOwnProperty("parts")) { tcnt = group.targetCount || msg.parts.count; }
+                if (group.currentCount >= tcnt || msg.hasOwnProperty('complete')) {
                     completeSend(partId);
                 }
             } catch(err) {
